@@ -1,3 +1,5 @@
 fastapi
 uvicorn[standard]
 skyfield
+pydantic
+python-dotenv
