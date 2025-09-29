@@ -1,0 +1,126 @@
+Kundali API - API Documentation (txt)
+
+Base URL
+  https://astro-calculations.onrender.com
+
+Endpoints
+  1) Health Check
+     Method: GET
+     Path: /
+     Input Body: none
+     Output Body (application/json):
+       {
+         "status": "Kundali API is running. Go to /docs to use the calculator."
+       }
+
+  2) Calculate Birth Chart Data
+     Method: POST
+     Path: /calculate/chart-data
+     Content-Type: application/json
+
+     Input Body (application/json):
+       {
+         "name": "string (person's name)",
+         "birth_datetime": "ISO 8601 datetime, e.g. 1990-05-15T14:30:00Z",
+         "latitude": number,
+         "longitude": number
+       }
+
+     Notes:
+       - "birth_datetime" must be a valid ISO 8601 timestamp (UTC recommended, e.g. ...Z)
+       - "latitude" is in decimal degrees (positive for North, negative for South)
+       - "longitude" is in decimal degrees (positive for East, negative for West)
+
+     Output Body (application/json):
+       {
+         "input_data": {
+           "name": "string",
+           "birth_datetime": "ISO 8601 datetime",
+           "latitude": number,
+           "longitude": number
+         },
+         "calculation_results": {
+           "ayanamsa_decimal_degree": number,
+           "lagna": {
+             "decimal_degree": number,
+             "dms": "string (deg° min' sec\" )",
+             "sign": "string (zodiac sign)",
+             "house": 1
+           },
+           "house_cusps_sripathi": {
+             "house_1": "string (DMS with sign)",
+             "house_2": "string",
+             "house_3": "string",
+             "house_4": "string",
+             "house_5": "string",
+             "house_6": "string",
+             "house_7": "string",
+             "house_8": "string",
+             "house_9": "string",
+             "house_10": "string",
+             "house_11": "string",
+             "house_12": "string"
+           },
+           "planetary_positions": [
+             {
+               "graha": "string (planet/graha name)",
+               "sidereal_longitude_decimal": number,
+               "sidereal_longitude_dms": "string (DMS)",
+               "sign": "string (zodiac sign)",
+               "house": number (1-12)
+             }
+             // ... one entry per planet/graha
+           ]
+         }
+       }
+
+Examples
+  Request:
+    POST /calculate/chart-data
+    Content-Type: application/json
+    {
+      "name": "John Doe",
+      "birth_datetime": "1990-05-15T14:30:00Z",
+      "latitude": 28.6139,
+      "longitude": 77.2090
+    }
+
+  Response (example shape; numeric values vary):
+    {
+      "input_data": {
+        "name": "John Doe",
+        "birth_datetime": "1990-05-15T14:30:00Z",
+        "latitude": 28.6139,
+        "longitude": 77.209
+      },
+      "calculation_results": {
+        "ayanamsa_decimal_degree": 23.8547,
+        "lagna": {
+          "decimal_degree": 145.2341,
+          "dms": "145° 14' 2.76\"",
+          "sign": "Leo",
+          "house": 1
+        },
+        "house_cusps_sripathi": {
+          "house_1": "145° 14' 2.76\" (Leo)",
+          "house_2": "175° 14' 2.76\" (Virgo)"
+          // ... through house_12
+        },
+        "planetary_positions": [
+          {
+            "graha": "Sun",
+            "sidereal_longitude_decimal": 31.2341,
+            "sidereal_longitude_dms": "31° 14' 2.76\"",
+            "sign": "Aries",
+            "house": 10
+          }
+          // ... remaining planets
+        ]
+      }
+    }
+
+Additional Info
+  - Interactive docs: /docs (Swagger UI)
+  - Alternate docs: /redoc
+  - Health: GET /
+
