@@ -1,227 +1,233 @@
 # astro_logic.py
 import math
-from datetime import datetime, timezone
-from skyfield.api import Topos, load
+from datetime import timezone
+from skyfield.api import load
 
-# Load the ephemeris data from Skyfield
 ts = load.timescale()
-eph = load('de421.bsp')
-earth = eph['earth']
+eph = load("de421.bsp")
+earth = eph["earth"]
+sun = eph["sun"]
+moon = eph["moon"]
 
-# --- Logic Translated from General.bas ---
+def get_skyfield_time_from_datetime(dt):
+    """Convert a datetime object to a Skyfield time object."""
+    return ts.from_datetime(dt)
 
-def calculate_julian_day(dt: datetime) -> float:
-    """Converts a datetime object to a Julian Day number."""
-    # Ensure the datetime is timezone-aware (UTC)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    
-    time_obj = ts.from_datetime(dt)
-    return time_obj.tt
+def _limit360(x):
+    return x % 360.0
 
-def calculate_ayanamsa(julian_day: float) -> float:
+def get_zodiac_sign(deg):
+    signs = [
+        "Aries","Taurus","Gemini","Cancer",
+        "Leo","Virgo","Libra","Scorpio",
+        "Sagittarius","Capricorn","Aquarius","Pisces"
+    ]
+    return signs[int((deg % 360.0) // 30.0)]
+
+# ------------------------------
+# GMST / LST (hours-based, robust)
+# ------------------------------
+def gmst_in_degrees(time_obj):
+    # Meeus formula producing GMST in degrees (uses UT1)
+    jd_ut1 = time_obj.ut1
+    T_ut1 = (jd_ut1 - 2451545.0) / 36525.0
+    gmst_deg = (
+        280.46061837
+        + 360.98564736629 * (jd_ut1 - 2451545.0)
+        + 0.000387933 * (T_ut1 ** 2)
+        - (T_ut1 ** 3) / 38710000.0
+    ) % 360.0
+    return gmst_deg
+
+def local_sidereal_time_degrees(time_obj, longitude_east_deg):
     """
-    Calculates the Ayanamsha (Lahiri/Chitrapaksha) value.
-    This formula is a direct translation of the logic found in General.bas.
+    Compute LST robustly:
+      gmst_hours = gmst_deg / 15
+      longitude_hours = longitude_deg / 15
+      lst_hours = (gmst_hours + longitude_hours) % 24
+      lst_deg = lst_hours * 15
     """
-    # The formula is based on a standard polynomial model for the Lahiri Ayanamsha.
-    # The constants are derived from the original VB6 code's calculations.
-    T = (julian_day - 2451545.0) / 36525.0
-    
-    # Standard Lahiri Ayanamsha formula
-    ayanamsa_decimal = (24.007689 +
-                        0.000305 * T +
-                        0.000000041 * (T**2) +
-                        (1.396342 * T) +
-                        (0.000000018 * (T**2)))
-    
-    return ayanamsa_decimal
+    gmst_deg = gmst_in_degrees(time_obj)
+    gmst_hours = gmst_deg / 15.0
+    longitude_hours = longitude_east_deg / 15.0
+    lst_hours = (gmst_hours + longitude_hours) % 24.0
+    lst_deg = lst_hours * 15.0
+    return lst_deg, gmst_deg, gmst_hours, lst_hours
 
-def calculate_sidereal_time(julian_day: float, longitude: float) -> float:
-    """
-    Calculates the Local Sidereal Time (LST).
-    This logic is also derived from functions within General.bas.
-    """
-    T = (julian_day - 2451545.0) / 36525.0
-    
-    # Mean Sidereal Time at Greenwich in degrees
-    mst_greenwich = 280.46061837 + 360.98564736629 * (julian_day - 2451545.0) + \
-                    0.000387933 * (T**2) - (T**3) / 38710000.0
-    
-    # Local Sidereal Time
-    lst_decimal = mst_greenwich + longitude
-    
-    # Normalize to 0-360 degrees
-    return lst_decimal % 360
+# ------------------------------
+# Lahiri ayanamsa (approx)
+# ------------------------------
+def calculate_lahiri_ayanamsa(time_obj, epoch_year=285.0, rate_arcsec_per_year=50.23885, add_nutation=True):
+    try:
+        dt = time_obj.utc_datetime()
+    except Exception:
+        dt = None
 
-def get_obliquity(julian_day: float) -> float:
-    """Calculates the obliquity of the ecliptic."""
-    T = (julian_day - 2451545.0) / 36525.0
-    # Formula for mean obliquity
-    obliquity_decimal = 23.4392911 - (0.013004167 * T) - (0.000000164 * (T**2)) + \
-                        (0.000000504 * (T**3))
-    return obliquity_decimal
+    if dt is not None:
+        start_of_year = dt.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        day_of_year = (dt - start_of_year).total_seconds() / 86400.0
+        year_decimal = dt.year + day_of_year / 365.2425
+    else:
+        jd_tt = time_obj.tt
+        T_j2000 = (jd_tt - 2451545.0) / 36525.0
+        year_decimal = 2000.0 + T_j2000 * 100.0
 
+    years_since = year_decimal - epoch_year
+    ayan_arcsec = years_since * rate_arcsec_per_year
+    mean_ayan_deg = ayan_arcsec / 3600.0
 
-def calculate_lagna(julian_day: float, latitude: float, longitude: float) -> dict:
-    """
-    Calculates the Lagna and other values needed for house calculation.
-    Returns a dictionary with all the key values.
-    """
-    ayanamsa = calculate_ayanamsa(julian_day)
-    lst = calculate_sidereal_time(julian_day, longitude)
-    ecl = get_obliquity(julian_day)
+    if add_nutation:
+        jd_tt = time_obj.tt
+        T_j2000 = (jd_tt - 2451545.0) / 36525.0
+        L_sun = (280.4665 + 36000.7698 * T_j2000) % 360.0
+        L_moon = (218.3165 + 481267.8813 * T_j2000) % 360.0
+        omega = (125.04452 - 1934.136261 * T_j2000 + 0.0020708 * (T_j2000**2)) % 360.0
+        Ls = math.radians(L_sun)
+        Lm = math.radians(L_moon)
+        om = math.radians(omega)
+        delta_psi_arcsec = (
+            -17.20 * math.sin(om)
+            - 1.32 * math.sin(2 * Ls)
+            - 0.23 * math.sin(2 * Lm)
+            + 0.21 * math.sin(2 * om)
+        )
+        delta_psi_deg = delta_psi_arcsec / 3600.0
+    else:
+        delta_psi_deg = 0.0
 
-    # Convert to Radians
-    lst_rad = math.radians(lst)
-    lat_rad = math.radians(latitude)
-    ecl_rad = math.radians(ecl)
+    return _limit360(mean_ayan_deg + delta_psi_deg)
 
-    # Core Ascendant Formula
-    y = -math.cos(lst_rad)
-    x = math.sin(lst_rad) * math.cos(ecl_rad) + math.tan(lat_rad) * math.sin(ecl_rad)
-    ascendant_tropical = math.degrees(math.atan2(y, x))
-    
-    lagna_sidereal = (ascendant_tropical - ayanamsa + 360) % 360
-    
-    return {
-        "lagna_decimal": lagna_sidereal,
-        "ayanamsa": ayanamsa,
-        "sidereal_time": lst,
-        "obliquity": ecl
-    }
-
-
-
-
-
-def get_zodiac_sign(degree: float) -> str:
-    """Determines the Zodiac sign for a given degree."""
-    signs = ["Aries", "Taurus", "Gemini", "Cancer", "Leo", "Virgo", 
-             "Libra", "Scorpio", "Sagittarius", "Capricorn", "Aquarius", "Pisces"]
-    index = math.floor(degree / 30)
-    return signs[index]
-
-def decimal_to_dms(decimal_degrees: float) -> str:
-    """Converts decimal degrees to a DMS string."""
-    degrees = int(decimal_degrees)
-    minutes_decimal = (decimal_degrees - degrees) * 60
-    minutes = int(minutes_decimal)
-    seconds = round((minutes_decimal - minutes) * 60, 2)
-    return f"{degrees}° {minutes}' {seconds}\""
-
-# (Add this new function to the bottom of astro_logic.py)
-
-def get_planetary_positions(julian_day: float):
-    """
-    Calculates the Sidereal positions of all 9 Grahas for a given Julian Day.
-    """
-    ayanamsa = calculate_ayanamsa(julian_day)
-    
-    # Create the Skyfield time object
-    t = ts.ut1_jd(julian_day)
-    
-    # Define the Grahas we need to calculate
-    # Note: Rahu/Ketu are calculated from the Moon's orbit
+# ------------------------------
+# Planets (sidereal)
+# ------------------------------
+def get_planetary_positions_sidereal(time_obj, ayanamsa_deg):
     grahas = {
-        'Sun': eph['sun'],
-        'Moon': eph['moon'],
-        'Mars': eph['mars'],
-        'Mercury': eph['mercury'],
-        'Jupiter': eph['jupiter barycenter'],
-        'Venus': eph['venus'],
-        'Saturn': eph['saturn barycenter']
+        "Sun": sun,
+        "Moon": moon,
+        "Mars": eph["mars"],
+        "Mercury": eph["mercury"],
+        "Jupiter": eph["jupiter barycenter"],
+        "Venus": eph["venus"],
+        "Saturn": eph["saturn barycenter"],
     }
-    
-    positions = []
-    
-    # Calculate positions for Sun, Moon, and planets
+    out = []
     for name, body in grahas.items():
-        astrometric = earth.at(t).observe(body)
-        ecliptic_lat, ecliptic_lon, _ = astrometric.ecliptic_latlon()
-        
-        tropical_lon_decimal = ecliptic_lon.degrees
-        sidereal_lon_decimal = (tropical_lon_decimal - ayanamsa + 360) % 360
-        
-        positions.append({
+        astrom = earth.at(time_obj).observe(body)
+        ecl_lat, ecl_lon, _ = astrom.ecliptic_latlon()
+        trop = ecl_lon.degrees % 360.0
+        sid = _limit360(trop - ayanamsa_deg)
+        deg_in_sign = sid % 30.0
+        d = int(deg_in_sign)
+        m = int((deg_in_sign - d) * 60.0)
+        s = round(((deg_in_sign - d) * 60.0 - m) * 60.0, 2)
+        out.append({
             "graha": name,
-            "sidereal_longitude_decimal": round(sidereal_lon_decimal, 4),
-            "sidereal_longitude_dms": decimal_to_dms(sidereal_lon_decimal),
-            "sign": get_zodiac_sign(sidereal_lon_decimal)
+            "tropical_deg": round(trop, 6),
+            "sidereal_deg": round(sid, 6),
+            "sign": get_zodiac_sign(sid),
+            "deg_in_sign": round(deg_in_sign, 6),
+            "dms": f"{d}°{m}'{s}\""
         })
-        
-    # Calculate Rahu and Ketu (True Lunar Nodes)
-    # Get Moon's position and calculate the true lunar nodes
-    moon_pos = earth.at(t).observe(eph['moon'])
-    moon_lat, moon_lon, _ = moon_pos.ecliptic_latlon()
+    # Rahu/Ketu (mean node)
+    jd_tt = time_obj.tt
+    T = (jd_tt - 2451545.0) / 36525.0
+    omega = (125.04452 - 1934.136261 * T + 0.0020708 * (T**2)) % 360.0
+    rahu_trop = omega
+    rahu_sid = _limit360(rahu_trop - ayanamsa_deg)
+    ketu_sid = _limit360(rahu_sid + 180.0)
+    out.append({"graha": "Rahu", "tropical_deg": round(rahu_trop, 6), "sidereal_deg": round(rahu_sid, 6), "sign": get_zodiac_sign(rahu_sid)})
+    out.append({"graha": "Ketu", "tropical_deg": round(_limit360(rahu_trop + 180.0), 6), "sidereal_deg": round(ketu_sid, 6), "sign": get_zodiac_sign(ketu_sid)})
+    return out
+
+# ------------------------------
+# Ascendant/MC and Sripati houses
+# ------------------------------
+def ascendant_tropical_from_lst_deg(lst_deg, lat_deg, eps_deg):
+    ramc = math.radians(lst_deg)
+    e = math.radians(eps_deg)
+    l = math.radians(lat_deg)
+    # Standard formula for Ascendant
+    asc = math.atan2(math.cos(ramc), - (math.sin(ramc) * math.cos(e) + math.tan(l) * math.sin(e)))
+    return math.degrees(asc) % 360.0
+
+# --- CORRECTED FUNCTION ---
+# Replaced the previous MC formula with a more robust version.
+def mc_tropical_from_lst_deg(lst_deg, eps_deg):
+    ramc_rad = math.radians(lst_deg)
+    eps_rad = math.radians(eps_deg)
     
-    # Calculate the true longitude of the ascending node (Rahu)
-    # This uses the Moon's orbital elements to find where it crosses the ecliptic
-    moon_lat_rad = math.radians(moon_lat.degrees)
-    moon_lon_rad = math.radians(moon_lon.degrees)
+    # Standard formula using atan2 for correct quadrant
+    mc_rad = math.atan2(math.sin(ramc_rad) * math.cos(eps_rad), math.cos(ramc_rad))
     
-    # True longitude of ascending node calculation
-    # This is the correct astronomical formula for lunar nodes
-    rahu_tropical_lon_rad = moon_lon_rad - math.atan2(math.tan(moon_lat_rad), math.sin(moon_lon_rad))
-    rahu_tropical_lon = math.degrees(rahu_tropical_lon_rad)
+    return math.degrees(mc_rad) % 360.0
 
-    rahu_sidereal_lon = (rahu_tropical_lon - ayanamsa + 360) % 360
-
-    # Ketu is exactly 180 degrees opposite Rahu
-    ketu_sidereal_lon = (rahu_sidereal_lon + 180) % 360
-
-    positions.append({
-        "graha": "Rahu",
-        "sidereal_longitude_decimal": round(rahu_sidereal_lon, 4),
-        "sidereal_longitude_dms": decimal_to_dms(rahu_sidereal_lon),
-        "sign": get_zodiac_sign(rahu_sidereal_lon)
-    })
-
-    positions.append({
-        "graha": "Ketu",
-        "sidereal_longitude_decimal": round(ketu_sidereal_lon, 4),
-        "sidereal_longitude_dms": decimal_to_dms(ketu_sidereal_lon),
-        "sign": get_zodiac_sign(ketu_sidereal_lon)
-    })
-    
-    return positions
-
-
-def calculate_house_cusps(lagna_data: dict, latitude: float) -> list:
+def calculate_lagna_and_primaries(time_obj, latitude, longitude_east_deg, ayanamsa_deg):
     """
-    Calculates all 12 house cusps using the Equal House system.
-    Each house is 30 degrees, starting from the Lagna.
+    Returns dict with asc_tropical, asc_sidereal, mc_trop, ic_trop, desc_trop, lst_deg, gmst_deg, gmst_hours, lst_hours, eps_deg
     """
-    lagna_degree = lagna_data['lagna_decimal']
-    cusps = [0.0] * 12
-    for i in range(12):
-        cusps[i] = (lagna_degree + i * 30) % 360
-    return cusps
+    lst_deg, gmst_deg, gmst_hours, lst_hours = local_sidereal_time_degrees(time_obj, longitude_east_deg)
 
-def get_planet_house_placement(planetary_positions: list, house_cusps: list) -> list:
-    """Determines which house each planet falls into."""
-    updated_positions = []
-    for planet in planetary_positions:
-        planet_lon = planet['sidereal_longitude_decimal']
-        house = 1  # Default to house 1
-        
-        # Find which house the planet falls into
-        for i in range(12):
-            cusp_start = house_cusps[i]
-            cusp_end = house_cusps[(i + 1) % 12]
-            
-            # Handle the case where the house crosses the 0° Aries point
-            if cusp_start > cusp_end: 
-                # House crosses 0° Aries
-                if planet_lon >= cusp_start or planet_lon < cusp_end:
-                    house = i + 1
-                    break
-            else:
-                # Normal case - house doesn't cross 0° Aries
-                if cusp_start <= planet_lon < cusp_end:
-                    house = i + 1
-                    break
-        
-        planet['house'] = house
-        updated_positions.append(planet)
-    return updated_positions
+    # obliquity TT-based
+    T_tt = (time_obj.tt - 2451545.0) / 36525.0
+    eps_deg = (23.439291111 - 0.0130041666667 * T_tt - 0.0000001639 * (T_tt**2) + 0.0000005036 * (T_tt**3))
+
+    asc_trop = ascendant_tropical_from_lst_deg(lst_deg, latitude, eps_deg)
+    asc_sid = _limit360(asc_trop - ayanamsa_deg)
+    mc_trop = mc_tropical_from_lst_deg(lst_deg, eps_deg)
+    desc_trop = (asc_trop + 180.0) % 360.0
+    ic_trop = (mc_trop + 180.0) % 360.0
+
+    return {
+        "asc_tropical_deg": asc_trop,
+        "asc_sidereal_deg": asc_sid,
+        "mc_tropical_deg": mc_trop,
+        "desc_tropical_deg": desc_trop,
+        "ic_tropical_deg": ic_trop,
+        "lst_deg": lst_deg,
+        "lst_hours": lst_hours,
+        "gmst_deg": gmst_deg,
+        "gmst_hours": gmst_hours,
+        "eps_deg": eps_deg
+    }
+
+# --- CORRECTED FUNCTION ---
+# Replaced the flawed looping logic with explicit, quadrant-by-quadrant calculation.
+def calculate_sripati_house_cusps(time_obj, latitude, longitude_east_deg, ayanamsa_deg):
+    prim = calculate_lagna_and_primaries(time_obj, latitude, longitude_east_deg, ayanamsa_deg)
+    asc_trop = prim["asc_tropical_deg"]
+    mc_trop = prim["mc_tropical_deg"]
+    desc_trop = prim["desc_tropical_deg"]
+    ic_trop = prim["ic_tropical_deg"]
+
+    cusps_trop = [0.0] * 12
+
+    # Set cardinal cusps
+    cusps_trop[0] = asc_trop   # 1st House
+    cusps_trop[3] = ic_trop    # 4th House
+    cusps_trop[6] = desc_trop  # 7th House
+    cusps_trop[9] = mc_trop    # 10th House
+
+    # Calculate intermediate cusps by trisecting the arcs in zodiacal order
+    # Arc between 1st and 4th houses (for cusps 2, 3)
+    arc1_4 = (ic_trop - asc_trop + 360) % 360
+    cusps_trop[1] = _limit360(asc_trop + arc1_4 / 3.0)
+    cusps_trop[2] = _limit360(asc_trop + 2 * arc1_4 / 3.0)
+
+    # Arc between 4th and 7th houses (for cusps 5, 6)
+    arc4_7 = (desc_trop - ic_trop + 360) % 360
+    cusps_trop[4] = _limit360(ic_trop + arc4_7 / 3.0)
+    cusps_trop[5] = _limit360(ic_trop + 2 * arc4_7 / 3.0)
+
+    # Arc between 7th and 10th houses (for cusps 8, 9)
+    arc7_10 = (mc_trop - desc_trop + 360) % 360
+    cusps_trop[7] = _limit360(desc_trop + arc7_10 / 3.0)
+    cusps_trop[8] = _limit360(desc_trop + 2 * arc7_10 / 3.0)
+
+    # Arc between 10th and 1st houses (for cusps 11, 12)
+    arc10_1 = (asc_trop - mc_trop + 360) % 360
+    cusps_trop[10] = _limit360(mc_trop + arc10_1 / 3.0)
+    cusps_trop[11] = _limit360(mc_trop + 2 * arc10_1 / 3.0)
+
+    # Convert all tropical cusps to sidereal
+    cusps_sid = [_limit360(c - ayanamsa_deg) for c in cusps_trop]
+    return {"cusps_sid": cusps_sid, "primaries": prim}

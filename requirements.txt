@@ -1,5 +1,33 @@
-fastapi
-uvicorn[standard]
-skyfield
-pydantic
-python-dotenv
+# Core API Framework
+fastapi==0.117.1
+uvicorn[standard]==0.37.0
+
+# Astronomical Calculations
+skyfield==1.53
+jplephem==2.23
+skyfield-data==7.0.0
+
+# Data Validation and Serialization
+pydantic==2.11.9
+pydantic-core==2.33.2
+
+# HTTP Client (for testing/development)
+requests==2.32.5
+
+# Utility Libraries
+python-dotenv==1.1.1
+
+# Optional: Remove kerykeion if not used in current implementation
+# kerykeion==4.26.3
+
+# Mathematical Libraries (automatically installed with skyfield)
+numpy==2.3.3
+
+# Additional Dependencies (auto-installed with fastapi/uvicorn)
+starlette==0.48.0
+anyio==4.11.0
+h11==0.16.0
+httptools==0.6.4
+websockets==15.0.1
+watchfiles==1.1.0
+click==8.3.0

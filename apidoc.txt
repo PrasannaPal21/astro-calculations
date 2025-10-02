@@ -1,126 +1,291 @@
-Kundali API - API Documentation (txt)
+Vedic Astrology API - Complete Documentation
+===========================================
 
 Base URL
-  https://astro-calculations.onrender.com
+--------
+  Production: https://your-domain.com
+  Local Dev:  http://localhost:8000
+
+API Overview
+------------
+  A sophisticated Vedic astrology API that calculates birth charts using the 
+  Sripati house system with precise astronomical calculations. Supports dates 
+  from 1899-07-29 to 2053-10-09 due to JPL ephemeris limitations.
+
+Authentication
+--------------
+  None required. Public API.
+
+Content-Type
+------------
+  All requests: application/json
+  All responses: application/json
 
 Endpoints
-  1) Health Check
-     Method: GET
-     Path: /
-     Input Body: none
-     Output Body (application/json):
+=========
+
+1) API Information
+   ---------------
+   Method: GET
+   Path: /
+   Input: None
+   
+   Response:
+   {
+     "message": "Vedic Astrology API is running",
+     "endpoints": {
+       "/vedic-chart": "POST - Calculate Vedic astrological chart",
+       "/docs": "GET - Interactive API documentation"
+     },
+     "supported_date_range": {
+       "minimum": "1899-07-29",
+       "maximum": "2053-10-09",
+       "note": "Dates outside this range will return an error due to ephemeris limitations"
+     }
+   }
+
+2) Calculate Vedic Chart
+   ---------------------
+   Method: POST
+   Path: /vedic-chart
+   Content-Type: application/json
+
+   Input Body:
+   {
+     "name": "string (person's name)",
+     "birthplace": "string (birth location)",
+     "birth_datetime": "string (ISO 8601 format, e.g., '1990-05-15T14:30:00')",
+     "latitude": number (decimal degrees, -90 to +90),
+     "longitude": number (decimal degrees, -180 to +180)
+   }
+
+   Timezone Handling:
+   - If birth_datetime has no timezone info, assumes IST (UTC+5:30)
+   - If birth_datetime includes timezone, uses that timezone
+   - All calculations performed in UTC internally
+
+   Date Range Validation:
+   - Minimum supported date: 1899-07-29
+   - Maximum supported date: 2053-10-09
+   - Dates outside this range return HTTP 400 error
+
+   Success Response (HTTP 200):
+   {
+     "name": "string",
+     "birthplace": "string",
+     "birth_datetime_input": "string (original input)",
+     "assumed_tz_handling": "string ('assumed_IST' or 'from_input')",
+     "birth_datetime_used_utc": "string (UTC timestamp used for calculations)",
+     "ayanamsa_deg": number,
+     "lagna_sidereal_deg": number,
+     "lagna_sign": "string (zodiac sign)",
+     "moon_sign": "string (zodiac sign)",
+     "houses_sidereal": [
        {
-         "status": "Kundali API is running. Go to /docs to use the calculator."
+         "house": number (1-12),
+         "cusp_deg": number,
+         "sign": "string (zodiac sign)"
        }
-
-  2) Calculate Birth Chart Data
-     Method: POST
-     Path: /calculate/chart-data
-     Content-Type: application/json
-
-     Input Body (application/json):
+       // ... 12 entries total
+     ],
+     "planets_sidereal": [
        {
-         "name": "string (person's name)",
-         "birth_datetime": "ISO 8601 datetime, e.g. 1990-05-15T14:30:00Z",
-         "latitude": number,
-         "longitude": number
+         "graha": "string (planet name)",
+         "tropical_deg": number,
+         "sidereal_deg": number,
+         "sign": "string (zodiac sign)",
+         "deg_in_sign": number,
+         "dms": "string (degrees°minutes'seconds\")"
        }
+       // 9 entries: Sun, Moon, Mars, Mercury, Jupiter, Venus, Saturn, Rahu, Ketu
+     ],
+     "debug": {
+       "gmst_deg": number,
+       "gmst_hours": number,
+       "lst_deg": number,
+       "lst_hours": number,
+       "eps_deg": number,
+       "primary_tropical_asc_deg": number,
+       "primary_tropical_mc_deg": number
+     }
+   }
 
-     Notes:
-       - "birth_datetime" must be a valid ISO 8601 timestamp (UTC recommended, e.g. ...Z)
-       - "latitude" is in decimal degrees (positive for North, negative for South)
-       - "longitude" is in decimal degrees (positive for East, negative for West)
+   Error Responses:
+   
+   HTTP 400 - Invalid Date Range:
+   {
+     "detail": "Birth date must be between 1899-07-29 and 2053-10-09. Provided date: YYYY-MM-DD"
+   }
 
-     Output Body (application/json):
+   HTTP 400 - Ephemeris Range Error:
+   {
+     "detail": "Date YYYY-MM-DD is outside the supported ephemeris range (1899-07-29 to 2053-10-09). Please use a date within this range."
+   }
+
+   HTTP 422 - Validation Error (Invalid Input):
+   {
+     "detail": [
        {
-         "input_data": {
-           "name": "string",
-           "birth_datetime": "ISO 8601 datetime",
-           "latitude": number,
-           "longitude": number
-         },
-         "calculation_results": {
-           "ayanamsa_decimal_degree": number,
-           "lagna": {
-             "decimal_degree": number,
-             "dms": "string (deg° min' sec\" )",
-             "sign": "string (zodiac sign)",
-             "house": 1
-           },
-           "house_cusps_sripathi": {
-             "house_1": "string (DMS with sign)",
-             "house_2": "string",
-             "house_3": "string",
-             "house_4": "string",
-             "house_5": "string",
-             "house_6": "string",
-             "house_7": "string",
-             "house_8": "string",
-             "house_9": "string",
-             "house_10": "string",
-             "house_11": "string",
-             "house_12": "string"
-           },
-           "planetary_positions": [
-             {
-               "graha": "string (planet/graha name)",
-               "sidereal_longitude_decimal": number,
-               "sidereal_longitude_dms": "string (DMS)",
-               "sign": "string (zodiac sign)",
-               "house": number (1-12)
-             }
-             // ... one entry per planet/graha
-           ]
-         }
+         "type": "missing",
+         "loc": ["body", "field_name"],
+         "msg": "Field required",
+         "input": {...}
        }
+     ]
+   }
+
+   HTTP 500 - Calculation Error:
+   {
+     "detail": "Calculation error: [specific error message]"
+   }
 
 Examples
-  Request:
-    POST /calculate/chart-data
-    Content-Type: application/json
+========
+
+Valid Request:
+--------------
+POST /vedic-chart
+Content-Type: application/json
+
+{
+  "name": "Mahatma Gandhi",
+  "birthplace": "Porbandar, Gujarat",
+  "birth_datetime": "1969-10-02T07:30:00",
+  "latitude": 21.6417,
+  "longitude": 69.6293
+}
+
+Response:
+{
+  "name": "Mahatma Gandhi",
+  "birthplace": "Porbandar, Gujarat",
+  "birth_datetime_input": "1969-10-02T07:30:00",
+  "assumed_tz_handling": "assumed_IST",
+  "birth_datetime_used_utc": "1969-10-02T02:00:00+00:00",
+  "ayanamsa_deg": 23.2156789,
+  "lagna_sidereal_deg": 156.7891234,
+  "lagna_sign": "Virgo",
+  "moon_sign": "Scorpio",
+  "houses_sidereal": [
     {
-      "name": "John Doe",
-      "birth_datetime": "1990-05-15T14:30:00Z",
-      "latitude": 28.6139,
-      "longitude": 77.2090
-    }
-
-  Response (example shape; numeric values vary):
+      "house": 1,
+      "cusp_deg": 156.7891234,
+      "sign": "Virgo"
+    },
+    // ... 11 more houses
+  ],
+  "planets_sidereal": [
     {
-      "input_data": {
-        "name": "John Doe",
-        "birth_datetime": "1990-05-15T14:30:00Z",
-        "latitude": 28.6139,
-        "longitude": 77.209
-      },
-      "calculation_results": {
-        "ayanamsa_decimal_degree": 23.8547,
-        "lagna": {
-          "decimal_degree": 145.2341,
-          "dms": "145° 14' 2.76\"",
-          "sign": "Leo",
-          "house": 1
-        },
-        "house_cusps_sripathi": {
-          "house_1": "145° 14' 2.76\" (Leo)",
-          "house_2": "175° 14' 2.76\" (Virgo)"
-          // ... through house_12
-        },
-        "planetary_positions": [
-          {
-            "graha": "Sun",
-            "sidereal_longitude_decimal": 31.2341,
-            "sidereal_longitude_dms": "31° 14' 2.76\"",
-            "sign": "Aries",
-            "house": 10
-          }
-          // ... remaining planets
-        ]
-      }
-    }
+      "graha": "Sun",
+      "tropical_deg": 188.1234567,
+      "sidereal_deg": 164.9077778,
+      "sign": "Virgo",
+      "deg_in_sign": 14.9077778,
+      "dms": "14°54'28.00\""
+    },
+    // ... 8 more planets
+  ],
+  "debug": {
+    "gmst_deg": 245.6789123,
+    "gmst_hours": 16.3785942,
+    "lst_deg": 315.3082456,
+    "lst_hours": 21.0205497,
+    "eps_deg": 23.4367123,
+    "primary_tropical_asc_deg": 179.9947890,
+    "primary_tropical_mc_deg": 268.1234567
+  }
+}
 
-Additional Info
-  - Interactive docs: /docs (Swagger UI)
-  - Alternate docs: /redoc
-  - Health: GET /
+Invalid Date Request:
+--------------------
+POST /vedic-chart
+Content-Type: application/json
 
+{
+  "name": "Ancient Person",
+  "birthplace": "Historical Location",
+  "birth_datetime": "1800-01-01T12:00:00",
+  "latitude": 25.0,
+  "longitude": 75.0
+}
+
+Error Response (HTTP 400):
+{
+  "detail": "Birth date must be between 1899-07-29 and 2053-10-09. Provided date: 1800-01-01"
+}
+
+cURL Examples
+=============
+
+Valid Request:
+curl -X POST "http://localhost:8000/vedic-chart" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Test Person",
+    "birthplace": "New Delhi",
+    "birth_datetime": "1990-05-15T14:30:00",
+    "latitude": 28.6139,
+    "longitude": 77.2090
+  }'
+
+API Information:
+curl -X GET "http://localhost:8000/"
+
+API Documentation:
+curl -X GET "http://localhost:8000/docs"
+
+Technical Details
+=================
+
+House System:
+- Sripati system with quadrant-by-quadrant trisection
+- Cardinal houses: 1st (Ascendant), 4th (IC), 7th (Descendant), 10th (MC)
+- Intermediate houses calculated by trisecting arcs between cardinal points
+
+Ayanamsha:
+- Lahiri/Chitrapaksha system
+- Includes nutation corrections
+- Rate: ~50.24 arcseconds per year
+
+Planetary Calculations:
+- JPL DE421 ephemeris for maximum precision
+- All major planets plus lunar nodes (Rahu/Ketu)
+- Mean node calculations for Rahu/Ketu
+
+Coordinate Systems:
+- Calculations in tropical coordinates
+- Converted to sidereal using Lahiri ayanamsha
+- Proper handling of 0°/360° boundary
+
+Timezone Handling:
+- Input without timezone assumes IST (UTC+5:30)
+- Input with timezone uses specified timezone
+- All ephemeris calculations in UTC
+
+Rate Limiting
+=============
+No rate limiting currently implemented.
+Consider implementing rate limiting for production use.
+
+Interactive Documentation
+=========================
+Visit /docs for Swagger UI interactive documentation
+Visit /redoc for ReDoc alternative documentation
+
+Status Codes Summary
+====================
+200 - Success
+400 - Invalid input (date range, validation errors)
+422 - Request body validation error
+500 - Internal server error (calculation failures)
+
+Support
+=======
+For issues or questions:
+- Check interactive docs at /docs
+- Verify date is within supported range (1899-2053)
+- Ensure proper JSON formatting
+- Check latitude (-90 to +90) and longitude (-180 to +180) ranges
+
+Last Updated: October 2025
+API Version: 1.0.0
