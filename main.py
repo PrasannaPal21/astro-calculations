@@ -1,5 +1,6 @@
 # main.py
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime, timezone, timedelta
 from astro_logic import (
@@ -16,6 +17,16 @@ app = FastAPI(
     description="An API for calculating Vedic astrological charts with Sripati house system",
     version="1.0.0"
 )
+
+# Add CORS middleware to allow frontend access
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allow all origins for development and deployment flexibility
+    allow_credentials=False,  # Set to False when using wildcard origins
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
+
 IST = timezone(timedelta(hours=5, minutes=30))
 
 class BirthInput(BaseModel):
