@@ -39,16 +39,16 @@ class BirthInput(BaseModel):
 @app.get("/")
 def read_root():
     return {
-        "message": "Vedic Astrology API is running",
-        "endpoints": {
-            "/vedic-chart": "POST - Calculate Vedic astrological chart",
-            "/docs": "GET - Interactive API documentation"
-        },
-        "supported_date_range": {
-            "minimum": "1899-07-29",
-            "maximum": "2053-10-09",
-            "note": "Dates outside this range will return an error due to ephemeris limitations"
-        }
+        "message": "running"
+        # "endpoints": {
+        #     "/vedic-chart": "POST - Calculate Vedic astrological chart",
+        #     "/docs": "GET - Interactive API documentation"
+       
+        # "supported_date_range": {
+        #     "minimum": "1899-07-29",
+        #     "maximum": "2053-10-09",
+        #     "note": "Dates outside this range will return an error due to ephemeris limitations"
+        # }
     }
 
 @app.post("/vedic-chart")
