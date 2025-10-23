@@ -1,5 +1,7 @@
 # 🌟 Vedic Astrology API
 
+for reference - created a corn-job which requests the api every 10 minutes to make sure it is always awake.
+
 A sophisticated FastAPI-based Vedic astrological calculation service that provides accurate birth chart data using traditional principles with modern computational precision. Features advanced Sripati house system, precise planetary positions, and comprehensive error handling.
 
 ## ✨ Features
