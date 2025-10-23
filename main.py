@@ -3,6 +3,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import datetime, timezone, timedelta
+
+# --- Original Imports (for V1) ---
 from astro_logic import (
     get_skyfield_time_from_datetime,
     calculate_lahiri_ayanamsa,
@@ -12,17 +14,21 @@ from astro_logic import (
     get_zodiac_sign
 )
 
+# --- New Import (for V2) ---
+from astro_logic2 import get_jyotishganit_chart
+
+
 app = FastAPI(
     title="Vedic Astrology API",
-    description="An API for calculating Vedic astrological charts with Sripati house system",
-    version="1.0.0"
+    description="An API for calculating Vedic astrological charts",
+    version="1.1.0"
 )
 
-# Add CORS middleware to allow frontend access
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for development and deployment flexibility
-    allow_credentials=False,  # Set to False when using wildcard origins
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
@@ -34,32 +40,29 @@ class BirthInput(BaseModel):
     birthplace: str
     birth_datetime: datetime
     latitude: float
-    longitude: float   # East-positive, e.g., Bangalore = 77.5946
+    longitude: float    # East-positive, e.g., Bangalore = 77.5946
 
 @app.get("/")
 def read_root():
     return {
-        "message": "running"
-        # "endpoints": {
-        #     "/vedic-chart": "POST - Calculate Vedic astrological chart",
-        #     "/docs": "GET - Interactive API documentation"
-       
-        # "supported_date_range": {
-        #     "minimum": "1899-07-29",
-        #     "maximum": "2053-10-09",
-        #     "note": "Dates outside this range will return an error due to ephemeris limitations"
-        # }
+        "message": "Vedic Astrology API is running.",
+        "endpoints": {
+            "/vedic-chart": "POST - (V1) Calculate chart using Skyfield/Sripati",
+            "/v2/vedic-chart": "POST - (V2) Calculate chart using Jyotishganit",
+            "/docs": "GET - Interactive API documentation"
+        }
     }
 
+# --- Original Endpoint (V1) ---
+# This endpoint remains unchanged and uses astro_logic.py
 @app.post("/vedic-chart")
 def get_vedic_chart(data: BirthInput):
     dt_in = data.birth_datetime
 
-    # Validate date range for ephemeris (de421.bsp covers 1899-07-29 through 2053-10-09)
+    # Validate date range for ephemeris (de421.bsp)
     min_date = datetime(1899, 7, 29, tzinfo=timezone.utc)
     max_date = datetime(2053, 10, 9, tzinfo=timezone.utc)
     
-    # Convert input date to UTC for validation
     if dt_in.tzinfo is None:
         dt_check = dt_in.replace(tzinfo=IST).astimezone(timezone.utc)
     else:
@@ -84,22 +87,13 @@ def get_vedic_chart(data: BirthInput):
     dt_utc = dt_local.astimezone(timezone.utc)
 
     try:
-        # Skyfield time
         t = get_skyfield_time_from_datetime(dt_utc)
-
-        # Ayanamsa (Lahiri)
         ayan = calculate_lahiri_ayanamsa(t)
-
-        # Ascendant & primaries
         lagna_info = calculate_lagna_and_primaries(t, data.latitude, data.longitude, ayan)
         lagna_sid = lagna_info["asc_sidereal_deg"]
         lagna_sign = get_zodiac_sign(lagna_sid)
-
-        # Houses (Sripati)
         houses_data = calculate_sripati_house_cusps(t, data.latitude, data.longitude, ayan)
         cusps = houses_data["cusps_sid"]
-
-        # Planets
         planets = get_planetary_positions_sidereal(t, ayan)
         
     except Exception as e:
@@ -107,7 +101,6 @@ def get_vedic_chart(data: BirthInput):
             raise HTTPException(
                 status_code=400,
                 detail=f"Date {dt_check.strftime('%Y-%m-%d')} is outside the supported ephemeris range (1899-07-29 to 2053-10-09). "
-                       f"Please use a date within this range."
             )
         else:
             raise HTTPException(
@@ -115,7 +108,6 @@ def get_vedic_chart(data: BirthInput):
                 detail=f"Calculation error: {str(e)}"
             )
 
-    # Moon sign
     moon = next((p for p in planets if p["graha"] == "Moon"), None)
     moon_sign = moon["sign"] if moon else None
 
@@ -134,7 +126,6 @@ def get_vedic_chart(data: BirthInput):
             for i, c in enumerate(cusps)
         ],
         "planets_sidereal": planets,
-        # debug info: GMST / LST and primary tropical primaries (helpful to verify correctness)
         "debug": {
             "gmst_deg": round(lagna_info["gmst_deg"], 9),
             "gmst_hours": round(lagna_info["gmst_hours"], 9),
@@ -146,3 +137,66 @@ def get_vedic_chart(data: BirthInput):
         }
     }
     return resp
+
+# --- New Endpoint (V2) ---
+# This new endpoint uses astro_logic2.py (Jyotishganit)
+@app.post("/v2/vedic-chart")
+def get_vedic_chart_v2(data: BirthInput):
+    """
+    Calculate a comprehensive Vedic chart using the Jyotishganit library.
+    This provides Panchanga, Divisional Charts (D1, D9, D10), and Vimshottari Dasha.
+    """
+    dt_in = data.birth_datetime
+    
+    # 1. Determine Timezone Offset
+    # Jyotishganit requires a float offset (e.g., 5.5)
+    if dt_in.tzinfo is None:
+        # If naive, assume IST (as per original logic)
+        timezone_offset = 5.5
+        dt_local = dt_in.replace(tzinfo=IST)
+        assumed_tz = "assumed_IST (UTC+05:30)"
+    else:
+        # If aware, calculate the offset in hours
+        offset_seconds = dt_in.utcoffset().total_seconds()
+        timezone_offset = offset_seconds / 3600.0
+        dt_local = dt_in
+        assumed_tz = f"from_input (UTC{timezone_offset:+.2f})"
+
+    # 2. Create NAIVE datetime for the library
+    # The jyotishganit library expects a naive datetime object
+    # representing the LOCAL time, and a separate float offset.
+    dt_local_naive = dt_local.replace(tzinfo=None)
+
+    # 3. Call the Jyotishganit logic
+    try:
+        chart_data = get_jyotishganit_chart(
+            birth_dt=dt_local_naive,  # Pass the NAIVE object
+            latitude=data.latitude,
+            longitude=data.longitude,
+            timezone_offset=timezone_offset
+        )
+        
+    except Exception as e:
+        # Catch errors from the calculation library
+        raise HTTPException(
+            status_code=400, # 400 for bad input (e.g., out-of-range date)
+            detail=f"Jyotishganit calculation error: {str(e)}"
+        )
+
+    # 4. Format the final response
+    return {
+        "input_data": {
+            "name": data.name,
+            "birthplace": data.birthplace,
+            "birth_datetime": data.birth_datetime.isoformat(),
+            "latitude": data.latitude,
+            "longitude": data.longitude,
+        },
+        "timezone_handling": {
+            "status": assumed_tz,
+            "offset_used_hours": timezone_offset,
+            "localized_datetime_used": dt_local.isoformat(),
+            "naive_datetime_passed_to_lib": dt_local_naive.isoformat()
+        },
+        "chart_results": chart_data
+    }
